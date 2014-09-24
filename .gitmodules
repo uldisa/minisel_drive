@@ -1,0 +1,3 @@
+[submodule "libraries/minisel_lcd"]
+	path = libraries/minisel_lcd
+	url = git@github.com:uldisa/minisel_lcd.git
