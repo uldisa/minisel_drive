@@ -12,6 +12,10 @@ volatile int counter=0;
 unsigned long lastDebounceTime=0;
 unsigned long debounceDelay=1;
 int lastSelectorValue;
+#define MAX_PHASE 100 // TRIAC fire MAX limit
+#define FULL_PHASE 100 // Power period dial
+volatile int selector=0;
+volatile int lastselector=-1;
 volatile int phase=0;
 void calibratePeriod(){
 		// Wait for stabilized startup
@@ -102,7 +106,7 @@ void phaseStart(){
 	}
 	int pulseLen=max_value/50;
 	max_value=max_value-pulseLen;
-	int pulseStart=max_value/19*(19-phase);
+	int pulseStart=max_value/MAX_PHASE*(MAX_PHASE-phase);
 	if(pulseStart>max_value-pulseLen){
 		pulseStart=max_value-pulseLen-pulseLen/2;
 	}
@@ -153,6 +157,8 @@ int main(void) {
 	TIMSK1=0b00000110; // Interrupt un OCR1A nad OCR1B match
 	lcd.on(MsTIMER|numbers_19[5]);
 	phase=0;
+	selector=0;
+	lastselector=-1; // Wait for selector==0 before start
 	lcd.on(MsTIMER|numbers_19[6]);
 	attachInterrupt(0, phaseStart, CHANGE);	
 	lcd.on(MsTIMER|numbers_19[7]);
@@ -176,17 +182,44 @@ void loop() {
   } 
  	
   if((millis()-lastDebounceTime)>debounceDelay){
-	phase=round((double)(25.5*selectorValue*19.0)/((double)(1023-selectorValue)*63));
+	selector=round((double)(25.5*selectorValue*19.0)/((double)(1023-selectorValue)*63));
 	// Print selector position
-	lcd.on(MsTIMER|numbers_19[phase]);
+	lcd.on(MsTIMER|numbers_19[selector]);
 	// Print selectorValue
-  	int p=selectorValue;
+	if(lastselector<0) {
+		lastselector=selector;
+	}
+	int turnSteps;
+	if(selector>lastselector) {
+		if(selector<lastselector+10) {
+			// Counterclock
+			turnSteps=lastselector-selector;
+		} else {
+			// Clockwise turn detected
+			turnSteps=lastselector+20-selector;
+		}
+	} else {
+		if(selector+10>lastselector) {
+			//Clockwise turn
+			turnSteps=lastselector-selector;
+		} else {
+			turnSteps=lastselector-20-selector;
+		}
+	}
+	lastselector=selector;
+	if(phase+turnSteps>MAX_PHASE) {
+		phase=MAX_PHASE;
+	} else if (phase+turnSteps< 0) {
+		phase=0;
+	} else {
+		phase+=turnSteps;
+	}
+  	int p=phase;
 	lcd.on(MsHOUR|numbers_19[p/100]);
 	p-=((int)p/100)*100;
 	lcd.on(MsMINU10|numbers_19[p/10]);
 	p-=((int)p/10)*10;
 	lcd.on(MsMINUTE|numbers_19[p]);
      lastDebounceTime=millis();
-
   }
 }
