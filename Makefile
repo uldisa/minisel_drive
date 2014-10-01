@@ -29,5 +29,6 @@ endif
 CPPFLAGS+=-Wall -Wextra -I. -Os -fno-exceptions -ffunction-sections -fdata-sections
 
 main.elf: main.o libcore.a libminisel_lcd.a libSPI.a
+test.elf: test.o libcore.a
 
 
