@@ -10,7 +10,7 @@
 byte ATuneModeRemember=2;
 //double input=80, output=50, setpoint=180;
 //double kp=2,ki=0.5,kd=2;
-double kp=5,ki=5,kd=0;
+double kp=1,ki=10,kd=0;
 
 
 double kpmodel=1.5, taup=100, theta[50];
@@ -127,8 +127,50 @@ void motor_on(void) {
 	lcd.off(MsSUN_BOX); // Alert off
 	myPID.SetMode(AUTOMATIC);
 }
-
-#define sample_hz 50
+double *change_k=0;
+void keyHandler(MINISEL_LCD *lcd,uint8_t buttons,uint8_t buttons_oldstate) {
+	if(change_k==0){
+		change_k=&kp;
+	}
+	int change_value=0;
+	if(buttons&0b00000010) {
+		change_value=-1;
+	}
+	if(buttons&0b00000100) {
+		change_value=1;
+	}
+	if(buttons&0b10000000) {
+		change_value=0;
+		if(&kp==change_k) {
+			change_k=&ki;
+		} else if(&ki==change_k) {
+			change_k=&kd;
+		} else {
+			change_k=&kp;
+		}
+	}
+	if(change_value) {
+		*change_k+=change_value;
+		myPID.SetTunings(kp,ki,kd);
+	}
+	if(&kp == change_k) {
+		lcd->on(MsPREWASH_ICON);
+		lcd->off(MsWASH_ICON);
+		lcd->off(MsRINSE_ICON);
+		lcd->on(Ms180|numbers_19[(int)myPID.GetKp()]);
+	} else if (&ki == change_k) {
+		lcd->off(MsPREWASH_ICON);
+		lcd->on(MsWASH_ICON);
+		lcd->off(MsRINSE_ICON);
+		lcd->on(Ms180|numbers_19[(int)myPID.GetKi()]);
+	} else {
+		lcd->off(MsPREWASH_ICON);
+		lcd->off(MsWASH_ICON);
+		lcd->on(MsRINSE_ICON);
+		lcd->on(Ms180|numbers_19[(int)myPID.GetKd()]);
+	}
+}
+#define sample_hz 10
 void setup() {
 	cli();
 	// Set CPU prescaler to 4Mhz
@@ -153,8 +195,9 @@ void setup() {
 	RPM_input=0;
 	RPM_setpoint=0;
 	myPID.SetMode(AUTOMATIC);
-	myPID.SetOutputLimits(10,120);
+	myPID.SetOutputLimits(1,150);
 	myPID.SetSampleTime(50);
+	lcd.keyCallback(&keyHandler);
 }
 
 ISR(TIMER2_COMPA_vect){
@@ -325,7 +368,6 @@ void SerialReceive()
   if(Serial.available())
   {
    char b = Serial.read(); 
-   Serial.flush(); 
    switch(b) {
 	case 'p':
 		k_=&kp;
@@ -357,12 +399,13 @@ void SerialReceive()
 		break;
    }
    }
+   Serial.flush(); 
 }
 void loop() {
 	counter++;
       	// read the input on analog pin 0:
   	if(counter%100 == 0 ) {
-		SerialReceive();
+		//SerialReceive();
 		SerialSend();
 /*		cli();
 		int lRPM_setpoint=RPM_setpoint;
@@ -402,7 +445,7 @@ void loop() {
 		lcd.on(MsTIMER|numbers_19[selector.position]);
 		double p=RPM_setpoint;
 		double lastRPM_setpoint=p;
-		p+=selector.turnSteps*10;
+		p+=selector.turnSteps;
 
 		if(p>MAX_PHASE) {
 			p=MAX_PHASE;
