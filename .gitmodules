@@ -1,3 +1,9 @@
 [submodule "libraries/minisel_lcd"]
 	path = libraries/minisel_lcd
 	url = git@github.com:uldisa/minisel_lcd.git
+[submodule "libraries/PID"]
+	path = libraries/PID
+	url = git@github.com:br3ttb/Arduino-PID-Library.git
+[submodule "libraries/APID"]
+	path = libraries/APID
+	url = git@github.com:br3ttb/Arduino-PID-AutoTune-Library.git

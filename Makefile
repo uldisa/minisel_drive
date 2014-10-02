@@ -1,6 +1,6 @@
 include Arduino.mk
 
-LIBS=core SPI minisel_lcd
+LIBS=core SPI minisel_lcd PID_v1 PID_AutoTune_v0
 #PORT=/dev/ttyACM0
 #PORT=COM11
 #CPU=atmega2560
@@ -28,7 +28,9 @@ endif
 
 CPPFLAGS+=-Wall -Wextra -I. -Os -fno-exceptions -ffunction-sections -fdata-sections
 
-main.elf: main.o libcore.a libminisel_lcd.a libSPI.a
+main.o: programSelector.h
+main.elf: main.o libcore.a libminisel_lcd.a libSPI.a libPID_v1.a
+
 test.elf: test.o libcore.a
 
 
