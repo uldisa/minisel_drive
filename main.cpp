@@ -1,28 +1,21 @@
 #include <Arduino.h>
-#define DEBUG  1
-#ifdef DEBUG
-#include <HardwareSerial.h>
-#endif
 #include <minisel_lcd.h>
+unsigned long millis(void);
 #include "programSelector.h"
+#define ENABLE_PID 1
+#ifdef ENABLE_PID
 #include <PID_v1.h>
+#endif
 
-byte ATuneModeRemember=2;
-//double input=80, output=50, setpoint=180;
-//double kp=2,ki=0.5,kd=2;
 double kp=1,ki=10,kd=0;
 
-
-double kpmodel=1.5, taup=100, theta[50];
-double outputStart=5;
-
-boolean tuning = false;
-unsigned long  modelTime, serialTime;
 
 #define ZERO_PIN 2
 #define TACHO_PIN 3
 #define PWM_PIN 9
 #define MOTOR_PIN 8
+#define SELECTOR_PIN A0
+#define HARTBEAT_LED A4
 
 MINISEL_LCD lcd;
 
@@ -58,11 +51,9 @@ volatile signed int counter=0;
 #define OFFSET_PHASE 0 // TRIAC fire MAX limit
 #define MAX_PHASE 255 // TRIAC fire MAX limit
 #define FULL_PHASE 255 // Power period dial
-unsigned int min_max[100];
 void calibratePeriod(){
 		cli();
-		uint16_t period_len=TCNT2;
-		TCNT1=0;
+		uint8_t period_len=TCNT2;
 		TCNT2=0;
 		sei();
 		// Wait for stabilized startup
@@ -75,7 +66,6 @@ void calibratePeriod(){
 			counter++;
 			return;
 		}
-		min_max[counter]=period_len;
 		if(zeroPinValue) {
 			if(min_LOW>period_len) {
 				min_LOW=period_len;
@@ -90,6 +80,7 @@ void calibratePeriod(){
 double RPM_setpoint;
 double RPM_input;
 double power_width;
+#ifdef ENABLE_PID
 PID myPID(&RPM_input,&power_width,&RPM_setpoint,kp,ki,kd,DIRECT);
 
 void motor_off(void) {
@@ -170,40 +161,69 @@ void keyHandler(MINISEL_LCD *lcd,uint8_t buttons,uint8_t buttons_oldstate) {
 		lcd->on(Ms180|numbers_19[(int)myPID.GetKd()]);
 	}
 }
+#endif
 #define sample_hz 10
 void setup() {
 	cli();
 	// Set CPU prescaler to 4Mhz
-	CLKPR = 0b10000000;
-	CLKPR = 0b00000010;
+	//CLKPR = 0b10000000;
+	//CLKPR = 0b00000010;
   	//Set Timer2 for LCD update and Triac control
-	TCCR2A = 0b00000000;	//Normal Timer2 mode.
-	TCCR2B = 0b00000110;	//Prescale 4Mhz/256
-	TIMSK2 = 0b00000000;	//Disable timer interrupts
+	//TCCR2A = 0b00000000;	//Normal Timer2 mode.
+	//TCCR2B = 0b00000110;	//Prescale 4Mhz/256
+//TCCR2=0b00000110;
+	TCCR0=0b00000011;
+	TCCR2=0b00000110;
+	//TIMSK2 = 0b00000000;	//Disable timer interrupts
+	//TIMSK=TIMSK&0b01111111; // Interrupt un OCR1A match
+	TIMSK|=0b00000001; // Enable overflow interrupt for lcd init
 	// 
 	pinMode(TACHO_PIN, INPUT);
 	pinMode(ZERO_PIN, INPUT);
 	pinMode(PWM_PIN, OUTPUT);
 	pinMode(MOTOR_PIN, OUTPUT);
+	pinMode(HARTBEAT_LED, OUTPUT);
+	pinMode(SELECTOR_PIN, INPUT);
+
+	ADCSRA |= _BV(ADPS2);
+	ADCSRA |= _BV(ADPS1);
+	ADCSRA |= _BV(ADPS0);
+
+	// enable a2d conversions
+	ADCSRA |= _BV(ADEN);
+#if defined(UCSRB)
+	UCSRB = 0;
+#elif defined(UCSR0B)
+	UCSR0B = 0;
+#endif
+
 	digitalWrite(PWM_PIN ,LOW);
+
+#ifdef ENABLE_PID
 	motor_off();
 
-	sei();
-	#ifdef DEBUG
-	Serial.begin(57600);
-	#endif
 	RPM_input=0;
 	RPM_setpoint=0;
 	myPID.SetMode(AUTOMATIC);
 	myPID.SetOutputLimits(1,150);
 	myPID.SetSampleTime(50);
 	lcd.keyCallback(&keyHandler);
+#endif
+	sei();
 }
 
-ISR(TIMER2_COMPA_vect){
+//ISR(TIMER2_COMPA_vect){
+ISR(TIMER2_COMP_vect){
 	digitalWrite(PWM_PIN, HIGH);
 	//for(int i=0;i<30;i++){asm("nop\n\r");}
 	digitalWrite(PWM_PIN, LOW);
+}
+volatile bool Timer2LcdUpdate=false;
+volatile unsigned long timer_overflow_count=0;
+ISR(TIMER0_OVF_vect){
+	timer_overflow_count++;
+	if(!Timer2LcdUpdate){lcd.update();}
+	digitalWrite(HARTBEAT_LED, !digitalRead(HARTBEAT_LED));
 }
 
 volatile uint16_t print_pulseStart;
@@ -215,6 +235,33 @@ volatile uint16_t lastPulseCounter;
 volatile uint16_t phase_change;
 volatile uint16_t alert_time;
 
+void print3digits(int x){
+	int tmp=x;
+	int overflow=0;
+	if(tmp>999) {
+		overflow=+1;
+		tmp=tmp%1000;
+	}
+	if(tmp<0) {
+		overflow=-1;
+		tmp=(-tmp)%1000;
+	}
+	lcd.off(MsLED_6);
+	lcd.off(MsLED_7);
+	lcd.on(MsHOUR|numbers_19[tmp/100]);
+	tmp-=((int)tmp/100)*100;
+	lcd.on(MsMINU10|numbers_19[tmp/10]);
+	tmp-=((int)tmp/10)*10;
+	lcd.on(MsMINUTE|numbers_19[tmp]);
+	if(overflow>0) {
+		lcd.on(MsLED_6);
+	}
+	if(overflow<0) {
+		lcd.on(MsLED_7);
+	}
+}
+
+#ifdef ENABLE_PID
 void power_widthStart(){
 	uint8_t TCNT2_on_enter=TCNT2;
 	print_real_max_value=TCNT2_on_enter;
@@ -222,7 +269,8 @@ void power_widthStart(){
 //	TIFR2=0b00000111; // Clear all interrupt flags
 	//digitalWrite(PWM_PIN, HIGH);
 	//digitalWrite(PWM_PIN, LOW);
-	print_pulseStart=OCR2A;
+	//print_pulseStart=OCR2A;
+	print_pulseStart=OCR2;
 	phase_change++;
 	//TCNT2=0;
 	uint8_t pw=power_width;
@@ -238,17 +286,22 @@ void power_widthStart(){
 			max_value=min_LOW;
 		}
 		uint8_t pulseStart=((double)max_value/(double)FULL_PHASE)*(FULL_PHASE-pw-OFFSET_PHASE);
-		OCR2A=TCNT2_on_enter+pulseStart;
+		//OCR2A=TCNT2_on_enter+pulseStart;
+		OCR2=TCNT2_on_enter+pulseStart;
 		if(TCNT2-TCNT2_on_enter>=pulseStart){
 			digitalWrite(PWM_PIN, HIGH);
 			digitalWrite(PWM_PIN, LOW);
-			TIFR2=0b00000111; // Clear all interrupt flags
+			//TIFR2=0b00000111; // Clear all interrupt flags
+			TIFR=0b11000000; // Clear all interrupt flags
 		} else {
-			TIFR2=0b00000111; // Clear all interrupt flags
-			TIMSK2=0b00000010; // Interrupt un OCR1A match
+			//TIFR2=0b00000111; // Clear all interrupt flags
+			TIFR=0b11000000; // Clear all interrupt flags
+			//TIMSK2=0b00000010; // Interrupt un OCR1A match
+			TIMSK=TIMSK|0b10000000; // Interrupt un OCR1A match
 		}
 	} else {
-		TIMSK2=0b00000000; // No interrupts
+		//TIMSK2=0b00000000; // No interrupts
+		TIMSK=TIMSK&0b01111111; // Interrupt un OCR1A match
 	}
 	sei();	
 	if(phase_change%(100/sample_hz)==0) {
@@ -272,175 +325,82 @@ void power_widthStart(){
 		if(power_width>MAX_PHASE) {
 			power_width=MAX_PHASE;
 		}
-		int pu=RPM_input;
-		lcd.on(MsHOUR|numbers_19[pu/100]);
-		pu-=((int)pu/100)*100;
-		lcd.on(MsMINU10|numbers_19[pu/10]);
-		pu-=((int)pu/10)*10;
-		lcd.on(MsMINUTE|numbers_19[pu]);
+		print3digits(RPM_input);
 	}
+	Timer2LcdUpdate=true;
 	lcd.update();
 }
+#endif
 void tacho() {
 	pulseCounter++;
 }
 
+#define OVERFLOW_LEN 4.096
+unsigned long millis(void) {
+	return (double)timer_overflow_count*OVERFLOW_LEN;
+
+}
+void delay(int millis) {
+	// 1 overlow =0.065535 sec;	
+	unsigned long delay=timer_overflow_count+(float)millis/OVERFLOW_LEN;
+	while(delay>timer_overflow_count) {
+	}
+}
 int main(void) {
-	init();
+	//init();
 	setup();
-	lcd.update();
-	lcd.update();
+	lcd.clear();
 	lcd.on(MsBACKLIGHT);
 	counter=-2;//First power_width change must  be ignored
-	lcd.on(MsTIMER|numbers_19[0]);
-
-	attachInterrupt(0, calibratePeriod, CHANGE);	
+	lcd.on(MsLED_1);
 	lcd.on(MsTIMER|numbers_19[1]);
+	// 1 overlow =0.065535 sec;	
+	delay(1000);
+	attachInterrupt(0, calibratePeriod, CHANGE);	
+	lcd.on(MsLED_4);
 	unsigned long time_limit=millis()+150;
 
 	while(counter<10 && millis()<time_limit){
 		// Wait for calibratin interrput to calculate minimal period length
 	}
-	#ifdef DEBUG
-	//Serial.println("this is a test");
-	for(int i=0;i<10;i+=2) {
-
-		Serial.print(i,DEC);
-		Serial.print(" ");
-		Serial.print(min_max[i],DEC);
-		Serial.print(" ");
-		Serial.println(min_max[i+1],DEC);
-	}
-	#endif
+	lcd.on(MsLED_3);
 	if(counter<10) {
 		// main ac frequency not detected in 2 seconds
 		// Print error number ad hang
 		while(1) {}
 	}
-	lcd.on(MsTIMER|numbers_19[2]);
-	TCCR2B=0b00000000; // Stop timer
-	lcd.on(MsTIMER|numbers_19[3]);
-	detachInterrupt(0);	
-	lcd.on(MsTIMER|numbers_19[4]);
-	TIMSK2=0b00000010; // Interrupt un OCR1A nad OCR1B match
-	lcd.on(MsTIMER|numbers_19[5]);
+	//detachInterrupt(0);	
+	print3digits(min_HIGH);
+	delay(1000);
+	print3digits(min_LOW);
+	delay(1000);
+	lcd.on(MsLED_5);
+	//TCCR2B=0b00000000; // Stop timer
+	//TCCR2=0b00000000; // Stop timer
+#ifdef ENABLE_PID
+	//TIMSK=(TIMSK&0b00111111)|0b10000000; // Interrupt un OCR2A match, Disable overflow
+	TIMSK=0b10000001; // Interrupt un OCR2A match, Disable overflow
 	power_width=0;
 	RPM_setpoint=0;
-	lcd.on(MsTIMER|numbers_19[6]);
 	attachInterrupt(0, power_widthStart, CHANGE);	
-	TCCR2B=0b00000110; // Start timer
+	//TCCR2B=0b00000110; // Start timer
+	//TCCR2=0b00000110; // Start timer
 	phase_change=0;
 	attachInterrupt(1, tacho, CHANGE);	
 	lcd.on(MsTIMER|numbers_19[7]);
+#endif
 	while(1) {
 		loop();
 	}		
 
 }	
-programSelector	selector(A0);	
+programSelector	selector(SELECTOR_PIN);	
 int cursor_on=0;
 double *k_;
-void SerialSendCursor(int p,int on,double value) {
-    Serial.print("k");
-    Serial.print((char)p);
-    p==on?Serial.print("<"):Serial.print(" ");
-    Serial.print(value);
-    p==on?Serial.print(">"):Serial.print(" ");
-}
-void SerialSend()
-{
-  Serial.print("setpoint: ");Serial.print(RPM_setpoint); Serial.print(" ");
-  Serial.print("error: ");Serial.print(RPM_setpoint-RPM_input); Serial.print(" ");
-  Serial.print("output: ");Serial.print(power_width); Serial.print(" ");
-	  
-	SerialSendCursor('p',cursor_on,myPID.GetKp()); 
-	SerialSendCursor('i',cursor_on,myPID.GetKi()); 
-	SerialSendCursor('d',cursor_on,myPID.GetKd()); 
-	Serial.println();
-/*    Serial.print("kp: ");Serial.print(myPID.GetKp());Serial.print(" ");
-    Serial.print("ki: ");Serial.print(myPID.GetKi());Serial.print(" ");
-    Serial.print("kd: ");Serial.print(myPID.GetKd());Serial.println();
-*/
-}
-
-void SerialReceive()
-{
-  if(Serial.available())
-  {
-   char b = Serial.read(); 
-   switch(b) {
-	case 'p':
-		k_=&kp;
-		cursor_on=b;
-		break;
-	case 'd':
-		k_=&kd;
-		cursor_on=b;
-		break;
-	case 'i':
-		k_=&ki;
-		cursor_on=b;
-  		break;	
-	case '+':
-		*k_+=1;
-		myPID.SetTunings(kp,ki,kd);
-		break;
-	case '-':
-		*k_-=.1;
-		myPID.SetTunings(kp,ki,kd);
-		break;
-	case '=':
-		*k_+=0.1;
-		myPID.SetTunings(kp,ki,kd);
-		break;
-	case '_':
-		*k_-=1;
-		myPID.SetTunings(kp,ki,kd);
-		break;
-   }
-   }
-   Serial.flush(); 
-}
 void loop() {
-	counter++;
+//	counter++;
       	// read the input on analog pin 0:
-  	if(counter%100 == 0 ) {
-		//SerialReceive();
-		SerialSend();
-/*		cli();
-		int lRPM_setpoint=RPM_setpoint;
-		int lRPM_input=RPM_input;
-		double lPIDOutput=PIDOutput;
-		int lpower_width=power_width;
-		sei();
-		Serial.print(lPIDInput,DEC);
-		Serial.print(" ");
-		Serial.print(lPIDOutput,DEC);
-		Serial.print(" ");
-		Serial.print(lPIDSetpoint,DEC);
-		Serial.print(" ");
-		Serial.print(lRPM_input,DEC);
-		Serial.print(" ");
-		Serial.print(lpower_width,DEC);
-		Serial.print(" ");
-		Serial.println(lRPM_setpoint,DEC);
-*/	}
-/* 
-	uint16_t pulseStart;
-	uint16_t max_value;
-#ifdef DEBUG
-	pulseStart=print_pulseStart;
-	max_value=print_max_value;
-  	if(counter%1000 == 0 ) {
-	Serial.print(pulseStart,DEC);
-	Serial.print(" ");
-	Serial.print(print_real_max_value,DEC);
-	Serial.print(" ");
-	Serial.println(pulseCounter,DEC);
-	}
-#endif
-*/
-
+//	print3digits(analogRead(SELECTOR_PIN));
 	if(selector.update()) {
 		lcd.on(MsTIMER|numbers_19[selector.position]);
 		double p=RPM_setpoint;
@@ -455,6 +415,7 @@ void loop() {
 		}
 		RPM_setpoint=p;
 		lcd.on(MsDRUM|numbers_19[(int)((double)RPM_setpoint/MAX_PHASE*19)]);
+#ifdef ENABLE_PID
 		if(p>0) {
 			if(lastRPM_setpoint == 0) {
 				// Switch motor on only from zero position
@@ -464,5 +425,6 @@ void loop() {
 		} else {
 			motor_off();
 		}
+#endif
 	}
 }

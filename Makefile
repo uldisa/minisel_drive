@@ -9,10 +9,11 @@ LIBS=core SPI minisel_lcd PID_v1 PID_AutoTune_v0
 #VARIANT=mega
 #PROGRAMMER=wiring
 #PORT=/dev/ttyUSB0
-PORT=COM10
-CPU=atmega328p
-BR=57600
-CPPFLAGS+=-DARDUINO_AVR_PRO -DARDUINO_ARCH_AVR
+PORT=COM9
+#CPU=atmega328p
+CPU=atmega8
+BR=19200
+CPPFLAGS+=-DARDUINO_AVR_PRO -DARDUINO_ARCH_AVR -DF_CPU=4000000L
 VARIANT=standard
 PROGRAMMER=arduino
 
@@ -29,8 +30,11 @@ endif
 CPPFLAGS+=-Wall -Wextra -I. -Os -fno-exceptions -ffunction-sections -fdata-sections
 
 main.o: programSelector.h
-main.elf: main.o libcore.a libminisel_lcd.a libSPI.a libPID_v1.a
+main.elf: main.o libminisel_lcd.a libSPI.a libPID_v1.a core/wiring_analog.o core/wiring_digital.o core/WInterrupts.o #libcore.a 
+
+test_LCD_atmega8.elf: test_LCD_atmega8.o libminisel_lcd.a libSPI.a libPID_v1.a libcore.a
 
 test.elf: test.o libcore.a
 
-
+ATmegaBOOT.o:CPPFLAGS+=-DF_CPU=4000000L 
+ATmegaBOOT.hex:ATmegaBOOT.c
