@@ -30,7 +30,8 @@ endif
 CPPFLAGS+=-Wall -Wextra -I. -Os -fno-exceptions -ffunction-sections -fdata-sections
 
 main.o: programSelector.h
-main.elf: main.o libminisel_lcd.a libSPI.a libPID_v1.a core/wiring_analog.o core/wiring_digital.o core/WInterrupts.o #libcore.a 
+#main.elf: main.o libminisel_lcd.a libSPI.a libPID_v1.a core/wiring_analog.o core/wiring_digital.o core/WInterrupts.o #libcore.a 
+main.elf: main.o libminisel_lcd.a libSPI.a libPID_v1.a libcore.a 
 
 test_LCD_atmega8.elf: test_LCD_atmega8.o libminisel_lcd.a libSPI.a libPID_v1.a libcore.a
 
