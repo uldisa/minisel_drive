@@ -13,10 +13,10 @@ double kp=1,ki=10,kd=0;
 
 #define ZERO_PIN 2
 #define TACHO_PIN 3
-#define PWM_PIN 4
-#define MOTOR_PIN A3
-#define MOTOR_REVERSE_PIN A2
-#define SELECTOR_PIN A0
+#define PWM_PIN A0
+#define MOTOR_PIN 7
+#define MOTOR_REVERSE_PIN A5
+#define SELECTOR_PIN A2
 #define HEARTBEAT_LED 9
 
 
@@ -63,8 +63,15 @@ MsDOT|MsF
 	unsigned int min_HIGH=-1;
 	unsigned int min_LOW=-1;
 #else
-	#define min_HIGH 153
-	#define min_LOW 157
+/* F_CPU=8Mhz Counter2 prescaler 1024 */
+
+	#define min_HIGH 0x4c
+	#define min_LOW 0x4f
+/* F_CPU=4Mhz Counter2 prescaler 256 */
+/* 
+	#define min_HIGH 0x99
+	#define min_LOW 0x9d
+*/
 #endif
 signed int counter=0;
 #define OFFSET_PHASE 0 // TRIAC fire MAX limit
@@ -159,14 +166,20 @@ void displayMotor(uint8_t state) {
 		digitalWrite(MOTOR_REVERSE_PIN,LOW);
 		RPM_setpoint=0;
 		power_width=0;
+#ifdef ENABLE_PID
 		myPID.SetMode(MANUAL);
+#endif
 		break;
 	case MOTOR_ON: 
+#ifdef ENABLE_PID
 		myPID.SetMode(AUTOMATIC);
+#endif
 		digitalWrite(MOTOR_PIN,HIGH);
 		break;
 	case MOTOR_ON_REVERSE: 
+#ifdef ENABLE_PID
 		myPID.SetMode(AUTOMATIC);
+#endif
 		digitalWrite(MOTOR_REVERSE_PIN,HIGH);
 		break;
 	}
@@ -326,7 +339,7 @@ int main(void) {
 	myPID.SetSampleTime(50);
 #endif
 	lcd.keyCallback(&keyHandler);
-	TCCR2=0b00000110;
+	TCCR2=0b00000111;
 	lcd.clear();
 	lcd.on(MsBACKLIGHT);
 	displayMotor(MOTOR_OFF);
@@ -340,15 +353,16 @@ int main(void) {
 		// Wait for calibratin interrput to calculate minimal period length
 	}
 	detachInterrupt(0);	
+	lcd.on(MsLED_3);
 	if(counter<10) {
 		// main ac frequency not detected in 2 seconds
 		// Print error number ad hang
 		while(1) {}
 	}
 	print3digits(min_HIGH);
-	//delay(1000);
+	delay(1000);
 	print3digits(min_LOW);
-	//delay(1000);
+	delay(1000);
 	//TIMSK|=0b10000000; // Interrupt un OCR2A match, Disable overflow
 
 	//power_width=0;
